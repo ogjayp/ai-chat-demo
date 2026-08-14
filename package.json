@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@ai-sdk/react": "^4.0.68",
+    "@clerk/nextjs": "^7.7.5",
     "@radix-ui/react-use-controllable-state": "^1.2.6",
     "@rive-app/react-webgl2": "^4.31.0",
     "@streamdown/cjk": "^1.0.3",
@@ -22,6 +23,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
+    "convex": "^1.44.0",
     "embla-carousel-react": "^8.6.0",
     "lucide-react": "^1.31.0",
     "media-chrome": "^4.19.2",
