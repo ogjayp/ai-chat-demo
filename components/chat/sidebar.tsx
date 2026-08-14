@@ -41,7 +41,10 @@ export function ChatSidebar({ onNavigate }: { onNavigate?: () => void }) {
           </Link>
         </Button>
       </div>
-      <ScrollArea className="min-h-0 flex-1 px-3 pb-3">
+      {/* Radix ScrollArea wraps content in a `display: table` div that grows
+          with content; force it to block so long titles truncate instead of
+          widening the list. */}
+      <ScrollArea className="min-h-0 flex-1 overflow-hidden px-3 pb-3 [&>[data-slot=scroll-area-viewport]>div]:block!">
         {conversations === undefined ? (
           <div className="flex flex-col gap-1.5 pt-2">
             {[0, 1, 2, 3].map((row) => (
@@ -67,13 +70,14 @@ export function ChatSidebar({ onNavigate }: { onNavigate?: () => void }) {
                 return (
                   <Link
                     className={cn(
-                      "truncate rounded-lg px-2.5 py-2 text-sm text-sidebar-foreground/80 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                      "block min-w-0 truncate rounded-lg px-2.5 py-2 text-sm text-sidebar-foreground/80 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
                       active &&
                         "bg-sidebar-accent font-medium text-sidebar-accent-foreground",
                     )}
                     href={href}
                     key={conversation._id}
                     onClick={onNavigate}
+                    title={conversation.title}
                   >
                     {conversation.title}
                   </Link>
