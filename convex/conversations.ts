@@ -110,6 +110,32 @@ export const send = mutation({
   },
 });
 
+export const appendAssistant = mutation({
+  args: {
+    conversationId: v.id("conversations"),
+    text: v.string(),
+  },
+  returns: v.id("messages"),
+  handler: async (ctx, { conversationId, text }) => {
+    const content = text.trim();
+    if (content.length === 0) {
+      throw new Error("Message cannot be empty");
+    }
+
+    const user = await getOrCreateCurrentUser(ctx);
+    const conversation = await ctx.db.get("conversations", conversationId);
+    if (conversation === null || conversation.userId !== user._id) {
+      throw new Error("Conversation not found");
+    }
+
+    return await ctx.db.insert("messages", {
+      conversationId,
+      role: "assistant",
+      content,
+    });
+  },
+});
+
 function titleFromText(text: string) {
   const trimmed = text.replace(/\s+/g, " ").trim();
   if (trimmed.length === 0) {
