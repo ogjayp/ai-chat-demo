@@ -9,6 +9,23 @@ export const userValidator = v.object({
   externalId: v.string(),
 });
 
+export const conversationValidator = v.object({
+  userId: v.id("users"),
+  title: v.string(),
+});
+
+export const messageValidator = v.object({
+  conversationId: v.id("conversations"),
+  role: v.union(v.literal("user"), v.literal("assistant")),
+  content: v.string(),
+});
+
 export default defineSchema({
   users: defineTable(userValidator).index("by_externalId", ["externalId"]),
+  conversations: defineTable(conversationValidator).index("by_userId", [
+    "userId",
+  ]),
+  messages: defineTable(messageValidator).index("by_conversationId", [
+    "conversationId",
+  ]),
 });

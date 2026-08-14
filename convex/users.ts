@@ -58,6 +58,37 @@ export const deleteFromClerk = internalMutation({
   },
 });
 
+export async function getOrCreateCurrentUser(ctx: MutationCtx) {
+  const identity = await ctx.auth.getUserIdentity();
+  if (identity === null) {
+    throw new Error("Not authenticated");
+  }
+
+  const existing = await userByExternalId(ctx, identity.subject);
+  if (existing !== null) {
+    return existing;
+  }
+
+  const name =
+    identity.name?.trim() ||
+    [identity.givenName, identity.familyName].filter(Boolean).join(" ").trim() ||
+    identity.email ||
+    "Anonymous";
+
+  const userId = await ctx.db.insert("users", {
+    name,
+    externalId: identity.subject,
+    ...(identity.email ? { email: identity.email } : {}),
+    ...(identity.pictureUrl ? { imageUrl: identity.pictureUrl } : {}),
+  });
+
+  const created = await ctx.db.get("users", userId);
+  if (created === null) {
+    throw new Error("Failed to create user");
+  }
+  return created;
+}
+
 export async function getCurrentUserOrThrow(ctx: QueryCtx) {
   const userRecord = await getCurrentUser(ctx);
   if (!userRecord) {
