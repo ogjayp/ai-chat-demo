@@ -20,6 +20,7 @@ import {
   PromptInputTools,
 } from "@/components/ai-elements/prompt-input";
 import { Shimmer } from "@/components/ai-elements/shimmer";
+import { Suggestion } from "@/components/ai-elements/suggestion";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { PENDING_AI_STORAGE_KEY } from "@/lib/chat";
@@ -27,9 +28,16 @@ import { useChat } from "@ai-sdk/react";
 import { useAuth, useClerk } from "@clerk/nextjs";
 import { DefaultChatTransport } from "ai";
 import { useConvexAuth, useMutation, useQuery } from "convex/react";
-import { MessageSquareIcon } from "lucide-react";
+import { SparklesIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
+
+const SUGGESTIONS = [
+  "Explain a concept like I'm five",
+  "Help me debug a TypeScript error",
+  "Draft a short product update email",
+  "Brainstorm weekend project ideas",
+];
 
 export function ChatPane({ conversationId }: { conversationId?: string }) {
   const router = useRouter();
@@ -106,6 +114,38 @@ export function ChatPane({ conversationId }: { conversationId?: string }) {
   const persisted = conversation?.messages ?? [];
   const isBusy = status === "submitted" || status === "streaming";
 
+  const startOrSend = useCallback(
+    async (content: string) => {
+      if (!typedId) {
+        const id = await createConversation({ text: content });
+        sessionStorage.setItem(PENDING_AI_STORAGE_KEY, id);
+        router.push(`/c/${id}`);
+        return;
+      }
+
+      await persistUserMessage({
+        conversationId: typedId,
+        text: content,
+      });
+      await sendMessage({ text: content });
+    },
+    [createConversation, persistUserMessage, router, sendMessage, typedId],
+  );
+
+  const handleSuggestion = useCallback(
+    (suggestion: string) => {
+      if (!isLoaded || isBusy) {
+        return;
+      }
+      if (!isSignedIn) {
+        openSignUp();
+        return;
+      }
+      void startOrSend(suggestion);
+    },
+    [isBusy, isLoaded, isSignedIn, openSignUp, startOrSend],
+  );
+
   // Show the in-flight assistant reply from useChat until the persisted copy
   // lands in Convex. Comparing against the last persisted assistant message
   // covers both the gap after streaming ends (before the mutation commits)
@@ -142,16 +182,37 @@ export function ChatPane({ conversationId }: { conversationId?: string }) {
       <Conversation className="min-h-0">
         <ConversationContent className="mx-auto w-full max-w-3xl">
           {isLoadingConversation ? null : showEmptyState ? (
-            <ConversationEmptyState
-              description="Type a message below to get started."
-              icon={<MessageSquareIcon className="size-8" />}
-              title="What's on your mind?"
-            />
+            <ConversationEmptyState className="min-h-[55svh]">
+              <div className="flex size-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+                <SparklesIcon className="size-6" />
+              </div>
+              <div className="space-y-1.5">
+                <h3 className="text-lg font-semibold tracking-tight">
+                  What&apos;s on your mind?
+                </h3>
+                <p className="text-sm text-muted-foreground">
+                  Ask anything — ideas, code, plans, or a quick question.
+                </p>
+              </div>
+              <div className="mt-2 flex max-w-md flex-wrap items-center justify-center gap-2">
+                {SUGGESTIONS.map((suggestion) => (
+                  <Suggestion
+                    key={suggestion}
+                    onClick={handleSuggestion}
+                    suggestion={suggestion}
+                  />
+                ))}
+              </div>
+            </ConversationEmptyState>
           ) : (
             <>
               {persisted.map((message) => (
-                <Message from={message.role} key={message._id}>
-                  <MessageContent>
+                <Message
+                  className="animate-in fade-in slide-in-from-bottom-2 duration-300"
+                  from={message.role}
+                  key={message._id}
+                >
+                  <MessageContent className="group-[.is-user]:bg-primary group-[.is-user]:text-primary-foreground">
                     {message.role === "assistant" ? (
                       <MessageResponse>{message.content}</MessageResponse>
                     ) : (
@@ -168,7 +229,11 @@ export function ChatPane({ conversationId }: { conversationId?: string }) {
                 </Message>
               ) : null}
               {showThinking ? (
-                <Message from="assistant" key="thinking">
+                <Message
+                  className="animate-in fade-in duration-300"
+                  from="assistant"
+                  key="thinking"
+                >
                   <MessageContent>
                     <Shimmer>Thinking…</Shimmer>
                   </MessageContent>
@@ -184,7 +249,7 @@ export function ChatPane({ conversationId }: { conversationId?: string }) {
           <p className="mb-2 text-sm text-destructive">{error.message}</p>
         ) : null}
         <PromptInput
-          className="rounded-2xl"
+          className="rounded-2xl shadow-lg shadow-black/5"
           onSubmit={async ({ text }) => {
             const content = text.trim();
             if (content.length === 0) {
@@ -203,18 +268,7 @@ export function ChatPane({ conversationId }: { conversationId?: string }) {
               throw new Error("Authentication required");
             }
 
-            if (!typedId) {
-              const id = await createConversation({ text: content });
-              sessionStorage.setItem(PENDING_AI_STORAGE_KEY, id);
-              router.push(`/c/${id}`);
-              return;
-            }
-
-            await persistUserMessage({
-              conversationId: typedId,
-              text: content,
-            });
-            await sendMessage({ text: content });
+            await startOrSend(content);
           }}
         >
           <PromptInputBody>
@@ -225,6 +279,9 @@ export function ChatPane({ conversationId }: { conversationId?: string }) {
             <PromptInputSubmit onStop={stop} status={status} />
           </PromptInputFooter>
         </PromptInput>
+        <p className="mt-2 text-center text-xs text-muted-foreground">
+          AI can make mistakes. Check important info.
+        </p>
       </div>
     </div>
   );
