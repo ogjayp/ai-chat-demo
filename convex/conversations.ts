@@ -22,11 +22,16 @@ export const list = query({
       return [];
     }
 
-    return await ctx.db
+    const conversations = await ctx.db
       .query("conversations")
       .withIndex("by_userId", (q) => q.eq("userId", user._id))
       .order("desc")
       .take(50);
+
+    return conversations.sort(
+      (a, b) =>
+        (b.updatedAt ?? b._creationTime) - (a.updatedAt ?? a._creationTime),
+    );
   },
 });
 
@@ -50,12 +55,15 @@ export const get = query({
       return null;
     }
 
+    // Keep the most recent 200 messages, returned in chronological order.
     const messages = await ctx.db
       .query("messages")
       .withIndex("by_conversationId", (q) =>
         q.eq("conversationId", conversationId),
       )
+      .order("desc")
       .take(200);
+    messages.reverse();
 
     return { conversation, messages };
   },
@@ -74,6 +82,7 @@ export const create = mutation({
     const conversationId = await ctx.db.insert("conversations", {
       userId: user._id,
       title: titleFromText(content),
+      updatedAt: Date.now(),
     });
     await ctx.db.insert("messages", {
       conversationId,
@@ -102,6 +111,9 @@ export const send = mutation({
       throw new Error("Conversation not found");
     }
 
+    await ctx.db.patch("conversations", conversationId, {
+      updatedAt: Date.now(),
+    });
     return await ctx.db.insert("messages", {
       conversationId,
       role: "user",
@@ -128,6 +140,9 @@ export const appendAssistant = mutation({
       throw new Error("Conversation not found");
     }
 
+    await ctx.db.patch("conversations", conversationId, {
+      updatedAt: Date.now(),
+    });
     return await ctx.db.insert("messages", {
       conversationId,
       role: "assistant",

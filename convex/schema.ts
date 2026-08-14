@@ -12,6 +12,8 @@ export const userValidator = v.object({
 export const conversationValidator = v.object({
   userId: v.id("users"),
   title: v.string(),
+  // Last activity, used to sort the sidebar. Optional for pre-existing docs.
+  updatedAt: v.optional(v.number()),
 });
 
 export const messageValidator = v.object({

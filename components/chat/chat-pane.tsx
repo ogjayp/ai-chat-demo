@@ -6,7 +6,11 @@ import {
   ConversationEmptyState,
   ConversationScrollButton,
 } from "@/components/ai-elements/conversation";
-import { Message, MessageContent } from "@/components/ai-elements/message";
+import {
+  Message,
+  MessageContent,
+  MessageResponse,
+} from "@/components/ai-elements/message";
 import {
   PromptInput,
   PromptInputBody,
@@ -15,19 +19,23 @@ import {
   PromptInputTextarea,
   PromptInputTools,
 } from "@/components/ai-elements/prompt-input";
+import { Shimmer } from "@/components/ai-elements/shimmer";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { PENDING_AI_STORAGE_KEY } from "@/lib/chat";
 import { useChat } from "@ai-sdk/react";
 import { useAuth, useClerk } from "@clerk/nextjs";
 import { DefaultChatTransport } from "ai";
-import { useMutation, useQuery } from "convex/react";
+import { useConvexAuth, useMutation, useQuery } from "convex/react";
+import { MessageSquareIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef } from "react";
 
 export function ChatPane({ conversationId }: { conversationId?: string }) {
   const router = useRouter();
   const { isLoaded, isSignedIn } = useAuth();
+  const { isLoading: isConvexLoading, isAuthenticated: isConvexAuthenticated } =
+    useConvexAuth();
   const { openSignUp } = useClerk();
   const createConversation = useMutation(api.conversations.create);
   const persistUserMessage = useMutation(api.conversations.send);
@@ -53,15 +61,28 @@ export function ChatPane({ conversationId }: { conversationId?: string }) {
     transport,
   });
 
+  // Redirect away from conversations that don't exist or aren't ours. Convex
+  // queries can briefly run unauthenticated while the Clerk token is being
+  // attached, so only trust `null` once auth has settled.
   useEffect(() => {
-    if (!typedId || conversation === undefined) {
+    if (!typedId || conversation !== null || isConvexLoading) {
       return;
     }
-    if (conversation === null) {
+    if (isConvexAuthenticated || (isLoaded && !isSignedIn)) {
       router.replace("/");
     }
-  }, [conversation, router, typedId]);
+  }, [
+    conversation,
+    isConvexAuthenticated,
+    isConvexLoading,
+    isLoaded,
+    isSignedIn,
+    router,
+    typedId,
+  ]);
 
+  // After creating a conversation on "/", kick off the AI response for the
+  // first message once we land on the conversation page.
   useEffect(() => {
     if (!typedId || conversation === undefined || conversation === null) {
       return;
@@ -83,46 +104,77 @@ export function ChatPane({ conversationId }: { conversationId?: string }) {
   }, [conversation, sendMessage, typedId]);
 
   const persisted = conversation?.messages ?? [];
-  const isStreaming = status === "submitted" || status === "streaming";
-  const streamingAssistant = isStreaming
-    ? [...messages].reverse().find((message) => message.role === "assistant")
-    : undefined;
-  const streamingText = streamingAssistant
-    ? streamingAssistant.parts
+  const isBusy = status === "submitted" || status === "streaming";
+
+  // Show the in-flight assistant reply from useChat until the persisted copy
+  // lands in Convex. Comparing against the last persisted assistant message
+  // covers both the gap after streaming ends (before the mutation commits)
+  // and the stale previous reply useChat still holds while a new send is
+  // in flight.
+  const lastPersistedAssistant = [...persisted]
+    .reverse()
+    .find((message) => message.role === "assistant");
+  const chatAssistant = [...messages]
+    .reverse()
+    .find((message) => message.role === "assistant");
+  const chatAssistantText = chatAssistant
+    ? chatAssistant.parts
         .filter((part) => part.type === "text")
         .map((part) => part.text)
         .join("")
     : "";
+  const overlayText =
+    chatAssistantText.trim().length > 0 &&
+    chatAssistantText.trim() !== lastPersistedAssistant?.content
+      ? chatAssistantText
+      : "";
 
-  const visibleMessages = [
-    ...persisted,
-    ...(streamingText
-      ? [
-          {
-            _id: "streaming-assistant",
-            role: "assistant" as const,
-            content: streamingText,
-          },
-        ]
-      : []),
-  ];
+  const isLoadingConversation = Boolean(typedId) && conversation === undefined;
+  const showThinking = status === "submitted" && overlayText.length === 0;
+  const showEmptyState =
+    !isLoadingConversation &&
+    persisted.length === 0 &&
+    overlayText.length === 0 &&
+    !showThinking;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <Conversation className="min-h-0">
-        <ConversationContent>
-          {typedId && conversation === undefined ? null : visibleMessages.length ===
-            0 ? (
+        <ConversationContent className="mx-auto w-full max-w-3xl">
+          {isLoadingConversation ? null : showEmptyState ? (
             <ConversationEmptyState
               description="Type a message below to get started."
+              icon={<MessageSquareIcon className="size-8" />}
               title="What's on your mind?"
             />
           ) : (
-            visibleMessages.map((message) => (
-              <Message from={message.role} key={message._id}>
-                <MessageContent>{message.content}</MessageContent>
-              </Message>
-            ))
+            <>
+              {persisted.map((message) => (
+                <Message from={message.role} key={message._id}>
+                  <MessageContent>
+                    {message.role === "assistant" ? (
+                      <MessageResponse>{message.content}</MessageResponse>
+                    ) : (
+                      message.content
+                    )}
+                  </MessageContent>
+                </Message>
+              ))}
+              {overlayText ? (
+                <Message from="assistant" key="streaming-assistant">
+                  <MessageContent>
+                    <MessageResponse>{overlayText}</MessageResponse>
+                  </MessageContent>
+                </Message>
+              ) : null}
+              {showThinking ? (
+                <Message from="assistant" key="thinking">
+                  <MessageContent>
+                    <Shimmer>Thinking…</Shimmer>
+                  </MessageContent>
+                </Message>
+              ) : null}
+            </>
           )}
         </ConversationContent>
         <ConversationScrollButton />
@@ -137,6 +189,11 @@ export function ChatPane({ conversationId }: { conversationId?: string }) {
             const content = text.trim();
             if (content.length === 0) {
               return;
+            }
+            if (isBusy) {
+              // Enter can still trigger a submit while a response is
+              // streaming; keep the draft and ignore it.
+              throw new Error("Wait for the current response to finish");
             }
             if (!isLoaded) {
               throw new Error("Auth is still loading");

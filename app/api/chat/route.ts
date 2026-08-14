@@ -90,6 +90,16 @@ function parseChatRequest(body: unknown): {
   if (!Array.isArray(record.messages)) {
     return null;
   }
+  const validMessages = record.messages.every(
+    (message) =>
+      typeof message === "object" &&
+      message !== null &&
+      typeof (message as Record<string, unknown>).role === "string" &&
+      Array.isArray((message as Record<string, unknown>).parts),
+  );
+  if (!validMessages) {
+    return null;
+  }
 
   return {
     conversationId: record.conversationId as Id<"conversations">,
